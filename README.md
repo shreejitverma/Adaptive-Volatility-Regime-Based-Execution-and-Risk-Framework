@@ -70,7 +70,7 @@ $$\text{BV} = \frac{\pi}{2} \sum_{i=1}^{n-1} |r_i| \cdot |r_{i+1}|$$
 
 This estimator is consistent under jumps and scales the product of adjacent absolute returns using the constant \(\pi/2\).
 
-**Key Property**: Under the null of no jumps, $$\text{BV} \xrightarrow{p} \sigma^2\) (consistent for integrated variance). Under the presence of jumps, BV estimates only the continuous component while ignoring discontinuities.
+**Key Property**: Under the null of no jumps (consistent for integrated variance). Under the presence of jumps, BV estimates only the continuous component while ignoring discontinuities.
 
 #### Realized Jumps (RJ)
 
