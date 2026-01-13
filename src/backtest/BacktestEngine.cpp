@@ -1,4 +1,4 @@
-#include "../include/adaptive_exec/backtest/BacktestEngine.hpp"
+#include "../../include/adaptive_exec/backtest/BacktestEngine.hpp"
 #include <iostream>
 
 namespace AdaptiveExec {
@@ -12,17 +12,7 @@ namespace AdaptiveExec {
         cash_ = initial_capital;
         position_ = 0.0;
         trades_.clear();
-        // Reserve some space to avoid reallocs
-        // equity_curve_ is dynamic, handled via conservative resizing or just appending to std::vector then converting?
-        // Eigen Vector is fixed size if usually not resized incrementally efficiently.
-        // For simplicity in this demo, let's use std::vector internally for building curve then export to Eigen.
-    }
-    
-    // Helper to append to Eigen Vector (inefficient but simple for demo)
-    void appendToVector(Vector& v, Scalar val) {
-        long n = v.size();
-        v.conservativeResize(n + 1);
-        v(n) = val;
+        equity_curve_.clear();
     }
 
     void BacktestEngine::executeOrder(int day, Scalar price, Scalar quantity, MarketRegime regime) {
@@ -51,11 +41,16 @@ namespace AdaptiveExec {
 
     void BacktestEngine::updateEndOfDay(Scalar close_price) {
         Scalar equity = cash_ + (position_ * close_price);
-        appendToVector(equity_curve_, equity);
+        equity_curve_.push_back(equity);
     }
 
     Vector BacktestEngine::getEquityCurve() const {
-        return equity_curve_;
+        // Convert std::vector to Eigen::VectorXd
+        Vector v(equity_curve_.size());
+        for (size_t i = 0; i < equity_curve_.size(); ++i) {
+            v(i) = equity_curve_[i];
+        }
+        return v;
     }
 
     std::vector<Trade> BacktestEngine::getTrades() const {
@@ -63,7 +58,7 @@ namespace AdaptiveExec {
     }
 
     MetricsResult BacktestEngine::getPerformanceMetrics() const {
-        return PerformanceMetrics::calculate(equity_curve_);
+        return PerformanceMetrics::calculate(getEquityCurve());
     }
 
 }

@@ -38,7 +38,7 @@ namespace AdaptiveExec {
         Scalar initial_capital_;
         Scalar cash_;
         Scalar position_; // Number of units
-        Vector equity_curve_; 
+        std::vector<Scalar> equity_curve_; 
         std::vector<Trade> trades_;
     };
 
