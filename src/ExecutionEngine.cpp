@@ -26,8 +26,8 @@ namespace AdaptiveExec {
 
         Scalar spread_cost = spread_bps * spread_mult;
         // Impact cost ~ sqrt(order_size)
-        // Coef * sqrt(size) * 10000 (scaling as in python notebook)
-        Scalar impact_cost = impact_coef * std::sqrt(order_size) * 10000.0; 
+        // Coef * sqrt(size)
+        Scalar impact_cost = impact_coef * std::sqrt(order_size); 
         
         return spread_cost + impact_cost;
     }

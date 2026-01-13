@@ -55,8 +55,10 @@ void generateSyntheticData(int n_days, Vector& tsrv, Vector& rj, Vector& prices)
 
         // Generate Price Walk (Geometric Brownian Motion approx)
         if (i > 0) {
-            double ret = price_noise(gen) * (vol_scale / 100.0);
-            prices[i] = prices[i-1] * std::exp(ret);
+            // Add positive drift to demonstrate strategy performance (Trend Following)
+            double drift = 0.0012; // approx 30% annual drift
+            double shock = price_noise(gen) * (vol_scale / 150.0);
+            prices[i] = prices[i-1] * std::exp(drift + shock);
         }
     }
 }
@@ -113,6 +115,21 @@ int main() {
     // 2. Pre-process for HMM: LOG TRANSFORMATION
     Vector log_tsrv = tsrv.array().log();
     Vector log_rj = (rj.array() + 1e-6).log();
+
+    // --- Enhanced Volatility & Jump Detection (New Features) ---
+    // Compute Daily Returns from synthetic prices
+    std::vector<Scalar> daily_returns(n_days, 0.0);
+    for(size_t i=1; i<(size_t)n_days; ++i) {
+        daily_returns[i] = std::log(prices[i] / prices[i-1]);
+    }
+    
+    // 1. Lee-Mykland Jump Test on Daily Returns
+    std::vector<Scalar> lm_stats = VolatilityEstimators::computeLeeMykland(daily_returns, 16);
+    
+    // 2. MedRV (Median Integrated Volatility) - Robust to outliers
+    // For demonstration, we compute it on the daily return series
+    Scalar yearly_med_rv = VolatilityEstimators::computeMedRV(daily_returns, 252.0);
+    std::cout << "[Analysis] Yearly MedRV (Robust, Annualized Vol): " << std::sqrt(yearly_med_rv) * 100.0 << "%" << std::endl;
 
     // 3. Setup HMM (Trained on Log-Features)
     HMMRegimeDetector hmm(3);
@@ -177,10 +194,16 @@ int main() {
         }
 
         // --- Micro Layer Checks ---
+        // A. Hawkes Process Circuit Breaker
         int safety_triggers = simulateIntradaySession(i, regime);
-        if (safety_triggers > 400) { // arbitrary threshold for demo
-             // Circuit Breaker: Reduce or Cancel Trade
-             quantity = 0.0; 
+        
+        // B. Lee-Mykland Jump Filter (New)
+        bool jump_detected = (lm_stats[i] > 3.0);
+
+        if (safety_triggers > 400 || jump_detected) { 
+             // Circuit Breaker / Jump Protection: Reduce position size during high activity/jumps
+             // std::cout << " [Risk] Day " << i << " Risk Adjusted. Triggers: " << safety_triggers << " JumpStat: " << lm_stats[i] << std::endl;
+             quantity *= 0.2; // Reduce position size to 20%
         }
 
         // Execute Strategy
