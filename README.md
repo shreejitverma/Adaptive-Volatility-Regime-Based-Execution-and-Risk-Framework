@@ -1,138 +1,169 @@
 # Adaptive Volatility Regime-Based Execution & Risk Framework
 
+![C++17](https://img.shields.io/badge/std-c%2B%2B17-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Status](https://img.shields.io/badge/status-active-success.svg)
+
 ## 1. Executive Summary
 
-This project presents a high-performance C++ framework for **adaptive trading and risk management**. The core thesis is that financial market volatility is not constant but switches between distinct **regimes** (e.g., low, normal, and high). By identifying these regimes in real-time, we can dynamically adjust execution strategies and risk parameters to optimize performance and mitigate catastrophic losses.
+The **Adaptive Volatility Regime-Based Execution & Risk Framework** is an institutional-grade, high-performance C++ library designed for **adaptive algorithmic trading** and **real-time risk management**. 
 
-The framework is designed for high-frequency applications and integrates several key quantitative finance concepts:
-- **Microstructure-Robust Volatility Estimation:** Using advanced estimators like TSRV and MedRV to handle market noise and jumps.
-- **Regime Detection:** Employing a Hidden Markov Model (HMM) to classify the current market state.
-- **Real-Time Safety Nets:** Utilizing Hawkes Processes for flash crash detection and Lee-Mykland tests for instantaneous price jump filtering.
-- **Adaptive Execution:** Adjusting position sizes and execution algorithms based on the detected regime.
+In modern high-frequency markets, the assumption of constant volatility (homoskedasticity) is fundamentally flawed. Markets exhibit distinct **regimes**—periods of calm, trends, and turbulent crashes—driven by microstructure noise, liquidity cascades, and exogenous shocks. This framework leverages advanced econometric models to identify these regimes in real-time and adapt execution logic accordingly.
 
-This document outlines the theoretical underpinnings, system architecture, implementation details, and backtesting results of the framework.
+### Key Capabilities
+*   **Microstructure-Robust Volatility Estimation**: Utilization of **Two-Scale Realized Volatility (TSRV)** and **Median Realized Volatility (MedRV)** to separate signal from noise and disentangle continuous volatility from jump components.
+*   **Regime Detection**: A **Gaussian Hidden Markov Model (HMM)** identifies latent market states (Low, Normal, High Volatility) using multi-factor emission probabilities.
+*   **Flash Crash Protection**: **Hawkes Processes** model the self-exciting nature of order book events to detect liquidity crises before they fully materialize.
+*   **Jump Dynamics**: **Lee-Mykland** statistical tests provide instantaneous filtration of price jumps to prevent adverse selection in execution algorithms.
+*   **Predictive Modeling**: **HAR-RV-J** (Heterogeneous Autoregressive) models forecast future volatility across multiple time horizons (Daily, Weekly, Monthly).
 
 ---
 
-## 2. Theoretical Framework
+## 2. System Architecture
 
-The model is built upon a cascade of econometric and statistical techniques, each addressing a specific market phenomenon.
+The system is architected as a modular pipeline where raw market data is transformed into actionable execution signals through a series of statistical filters.
 
-### 2.1. Volatility and Jump Measurement
-
-Standard Realized Volatility (`RV`) is susceptible to microstructure noise and jumps. We use more advanced estimators.
-
-*   **Median Realized Volatility (MedRV):**
-    To obtain a continuous volatility signal that is robust to sporadic price jumps, we use MedRV. It replaces the squared return in a standard `RV` calculation with the median of a local three-return window.
-
-    $$ 
-    \text{MedRV}_t = \frac{\pi}{6-4\sqrt{3}+\pi} \frac{N}{N-2} \sum_{i=2}^{N} \text{med}(|r_i|, |r_{i-1}|, |r_{i-2}|)^2 
-    $$ 
-
-    This effectively filters out large, isolated returns, providing a cleaner input for our regime detection model.
-
-*   **Lee-Mykland Jump Test:**
-    To explicitly identify and react to jumps, we use the statistical test proposed by Lee and Mykland (2008). It standardizes each return by the local volatility.
-
-    $$ 
-    L_t = \frac{|r_t|}{\hat{\sigma}_t} 
-    $$ 
+```mermaid
+graph TD
+    A[Raw Market Data] --> B(Volatility Estimators);
+    B --> C{Signal Decomposition};
+    C -->|Continuous Vol| D[HAR-RV-J Model];
+    C -->|Jump Component| E[Lee-Mykland Test];
+    C -->|Microstructure Noise| F[TSRV / MedRV];
     
-A value of `$L_t$` exceeding a critical threshold (e.g., 3.0) provides statistical evidence of a jump at time `$t$`, allowing our system to enter a defensive state.
-
-### 2.2. Regime Modeling (Hidden Markov Model)
-
-We model the market as a system with unobservable (hidden) states that drive observable phenomena (volatility, jumps).
-
-*   **Model:** A 3-state Gaussian HMM is used to represent **Low**, **Normal**, and **High** volatility regimes. Each state is defined by a unique Gaussian distribution over our input features (e.g., log-volatility and log-jumps).
-*   **Decoding:** The **Viterbi algorithm** is applied to find the most likely sequence of regimes given the history of observations, providing a real-time indicator of the current market state.
-
-### 2.3. Market Activity Modeling (Hawkes Process)
-
-To monitor for HFT-specific risks like order book cascades or flash crashes, we model the arrival of trades using a self-exciting Hawkes Process.
-
-*   **Conditional Intensity:** The probability of a trade occurring at time `$t$` is given by the conditional intensity `$\\lambda(t)$`.
-
-    $$ 
-    \lambda(t) = \mu + \sum_{t_i < t} \alpha e^{-\beta(t - t_i)} 
-    $$ 
-
-    *Where:*
-    - `$\\mu$` is the baseline arrival rate.
-    - Each past event `$t_i$` adds `$\\alpha$` to the intensity, which then decays exponentially at a rate of `$\\beta$`.
+    D --> G[HMM Regime Detector];
+    F --> G;
     
-A sudden spike in `$\\lambda(t)$` indicates a market frenzy, which triggers our circuit breaker logic.
-
----
-
-## 3. System Architecture and Implementation
-
-The framework is a modular C++ library (`AdaptiveVolCore`) with a demonstration executable (`AdaptiveVolDemo`).
-
-*   **Performance:** Code is heavily optimized using C++17, Eigen for vectorized linear algebra, and aggressive compiler flags (`-O3 -march=native`).
-*   **Dependencies:** `Eigen` and `GoogleTest` are managed automatically via `CMake` and `FetchContent`.
-*   **Modularity:**
-    - `VolatilityEstimators`: Implements all volatility/jump metrics.
-    - `HMMRegimeDetector`: Implements the Viterbi algorithm for state decoding.
-    - `HawkesModel`: Implements the intensity tracking model.
-    - `RiskManager`: Contains logic for adaptive position sizing.
-    - `BacktestEngine`: A simple, event-driven engine to simulate strategy performance.
-    - `ReportGenerator`: Prints performance summaries.
-
----
-
-## 4. Findings and Backtest Performance
-
-To validate the framework, we simulate a simple adaptive trend-following strategy on synthetic data designed to exhibit regime changes, drift, and jumps.
-
-*   **Strategy:** A simple SMA crossover (5-day vs. 20-day) is used to generate directional signals.
-*   **Adaptation Logic:**
-    1.  **Regime Sizing:** Position size is multiplied by 1.5x in low-volatility regimes and 0.5x in high-volatility regimes.
-    2.  **Jump Filtering:** If the Lee-Mykland statistic exceeds 3.0, position size is reduced by 80% for that period.
-    3.  **Intensity Halts:** If Hawkes intensity exceeds a critical threshold (simulated), trading is halted.
-
-The results demonstrate the value of adaptation. A static version of this strategy would suffer significant drawdowns during high-volatility periods, whereas our adaptive approach successfully mitigates risk.
-
-### Simulated Performance Report
-
-```text
-==============================================
-          PERFORMANCE REPORT                  
-==============================================
- Total Return:      53.53%
- CAGR:              70.72%
- Annualized Vol:    39.02%
- Sharpe Ratio:      1.57
- Sortino Ratio:     2.41
- Max Drawdown:      21.42%
- Win Rate:          57.21%
-==============================================
+    G -->|State: Low/Normal/High| H[Execution Engine];
+    E -->|Jump Detected| H;
+    
+    I[Trade Arrival Times] --> J[Hawkes Process];
+    J -->|Intensity > Threshold| K[Risk Manager];
+    K -->|Circuit Breaker| H;
+    
+    H --> L[Adaptive Orders];
 ```
 
-*Note: This performance is on synthetic data tailored to validate the model's adaptive capabilities and is not indicative of live trading results.*
+---
+
+## 3. Theoretical Framework & Methodology
+
+### 3.1. Robust Volatility Estimation
+
+Standard Realized Volatility (RV) is biased in the presence of microstructure noise (bid-ask bounce). We employ **Two-Scale Realized Volatility (TSRV)** to correct for this bias by subsampling returns at multiple frequencies.
+
+To robustly separate the continuous volatility component from jump components, we utilize **Median Realized Volatility (MedRV)** (Andersen et al., 2012):
+
+$$ 
+	ext{MedRV}_t = \frac{\pi}{6-4\sqrt{3}+\pi} \frac{N}{N-2} \sum_{i=2}^{N} \text{med}(|r_i|, |r_{i-1}|, |r_{i-2}|)^2 
+$$ 
+
+This estimator effectively "blocks" large isolated returns (jumps), providing a cleaner input for regime classification.
+
+### 3.2. Jump Detection (Lee-Mykland)
+
+To identify instantaneous price jumps, we employ the non-parametric test proposed by **Lee & Mykland (2008)**. The test statistic $L_t$ is defined as the ratio of the instantaneous return to the local bipower variation (instantaneous volatility):
+
+$$ 
+L_t = \frac{r_t}{\hat{\sigma}(t)} 
+$$ 
+
+A rejection of the null hypothesis (typically $|L_t| > 3.0$) indicates the presence of a jump, triggering immediate defensive logic in the `ExecutionEngine`.
+
+### 3.3. Regime Identification (HMM)
+
+We model the market state $S_t$ as a discrete-time Markov chain with $N$ hidden states (e.g., $S_t 
+in \{Low, Normal, High\}$). The observable variables $O_t$ (log-volatility, jump intensity) are emitted from state-dependent Gaussian distributions:
+
+$$ P(O_t | S_t = i) \sim \mathcal{N}(\mu_i, \Sigma_i) $$ 
+
+The **Viterbi Algorithm** is used for real-time decoding, determining the most likely sequence of hidden states given the observation history:
+
+$$ \hat{S}_{1:T} = \arg \max_{S_{1:T}} P(S_{1:T} | O_{1:T}) $$ 
+
+### 3.4. Flash Crash Detection (Hawkes Processes)
+
+To model the clustering of extreme events and liquidity withdrawal, we use a **Self-Exciting Hawkes Process**. The conditional intensity $\lambda(t)$ of trade arrivals (or price changes) is modeled as:
+
+$$ \lambda(t) = \mu + \sum_{t_i < t} \alpha e^{-\beta(t - t_i)} $$ 
+
+where:
+*   $\mu$ is the baseline background rate.
+*   $\alpha$ represents the branching ratio (endogeneity of the market).
+*   $\beta$ is the decay rate of the excitement.
+
+When $\int \lambda(t) dt$ exceeds a critical threshold, the system infers a self-reinforcing feedback loop (e.g., a liquidation cascade) and halts execution.
+
+### 3.5. Volatility Forecasting (HAR-RV-J)
+
+We implement the **Heterogeneous Autoregressive (HAR)** model (Corsi, 2009), extended to include Jumps (HAR-RV-J). This model captures the long-memory property of volatility by regressing realized volatility on its own lagged components over daily ($d$), weekly ($w$), and monthly ($m$) horizons:
+
+$$ RV_{t+1} = \beta_0 + \beta_d RV_t^{(d)} + \beta_w RV_t^{(w)} + \beta_m RV_t^{(m)} + \beta_J J_t + \epsilon_{t+1} $$ 
 
 ---
 
-## 5. Building and Usage
+## 4. Implementation Details
+
+The codebase is written in **C++17** with a focus on low-latency performance.
+
+*   **Linear Algebra**: Heavily relies on **Eigen** for vectorized matrix operations (SIMD).
+*   **Optimization**:
+    *   `O(1)` recursive updates for Hawkes Processes.
+    *   Precomputed precision matrices and log-determinants for HMM Gaussian emissions to avoid repeated inversions.
+    *   `O(N)` implementation of median filters for MedRV.
+*   **Build System**: CMake with `FetchContent` for dependency management (Eigen, GoogleTest).
+
+### Directory Structure
+```text
+include/adaptive_exec/
+├── HARModel.hpp           # Forecasting logic
+├── HawkesModel.hpp        # Point process intensity modeling
+├── HMMRegimeDetector.hpp  # Viterbi decoding & State estimation
+├── RiskManager.hpp        # Position sizing & Circuit breakers
+├── VolatilityEstimators.hpp # TSRV, MedRV, Lee-Mykland
+└── ExecutionEngine.hpp    # Main coordination logic
+```
+
+---
+
+## 5. Build & Usage
 
 ### Prerequisites
-- **CMake** (3.14+)
-- **C++ Compiler** (GCC, Clang, MSVC) supporting C++17
+*   C++17 compliant compiler (GCC 9+, Clang 10+, MSVC 2019+)
+*   CMake 3.14+
 
-### Build Steps
+### Compilation
 ```bash
-git clone https://github.com/shreejitverma/Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework.git
-cd Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework
 mkdir build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j4
+make -j$(nproc)
 ```
 
-### Running Tests and Demo
+### Running the Demo
+The demo simulates a synthetic market process with regime shifts to validate the adaptive logic.
 ```bash
-# Run unit tests
-./UnitTests
-
-# Run the backtest simulation
-./AdaptiveVolDemo
+./bin/AdaptiveVolDemo
 ```
+
+### Running Tests
+Unit tests cover all econometric estimators and state transitions.
+```bash
+./bin/UnitTests
+```
+
+---
+
+## 6. References
+
+This framework implements methodologies derived from the following seminal works in financial econometrics:
+
+1.  **Andersen, T. G., Dobrev, D., & Schaumburg, E. (2012).** "Jump-Robust Volatility Estimation using Nearest Neighbor Truncation." *Journal of Econometrics*, 169(1), 75-93.
+2.  **Corsi, F. (2009).** "A Simple Approximate Long-Memory Model of Realized Volatility." *Journal of Financial Econometrics*, 7(2), 174-196.
+3.  **Lee, S. S., & Mykland, P. A. (2008).** "Jumps in Financial Markets: A New Nonparametric Test and Jump Dynamics." *The Review of Financial Studies*, 21(6), 2535-2563.
+4.  **Zhang, L., Mykland, P. A., & Aït-Sahalia, Y. (2005).** "A Tale of Two Time Scales." *Journal of the American Statistical Association*, 100(472), 1394-1411.
+5.  **Hawkes, A. G. (1971).** "Spectra of some self-exciting and mutually exciting point processes." *Biometrika*, 58(1), 83-90.
+6.  **Aït-Sahalia, Y., & Jacod, J. (2014).** *High-Frequency Financial Econometrics*. Princeton University Press.
+
+---
+
+**Disclaimer**: This software is for educational and research purposes only. It does not constitute financial advice. Trading high-frequency strategies involves significant risk of loss.
