@@ -1,0 +1,1 @@
+/usr/bin/c++  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/UnitTests.dir/tests/test_hmm.cpp.o CMakeFiles/UnitTests.dir/tests/test_integration.cpp.o CMakeFiles/UnitTests.dir/tests/test_main.cpp.o CMakeFiles/UnitTests.dir/tests/test_metrics.cpp.o -o UnitTests  libAdaptiveVolCore.a lib/libgtest_main.a lib/libgtest.a

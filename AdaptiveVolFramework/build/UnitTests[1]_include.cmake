@@ -1,0 +1,5 @@
+if(EXISTS "/Users/shreejitverma/Documents/GitHub/Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework/AdaptiveVolFramework/build/UnitTests[1]_tests.cmake")
+  include("/Users/shreejitverma/Documents/GitHub/Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework/AdaptiveVolFramework/build/UnitTests[1]_tests.cmake")
+else()
+  add_test(UnitTests_NOT_BUILT UnitTests_NOT_BUILT)
+endif()

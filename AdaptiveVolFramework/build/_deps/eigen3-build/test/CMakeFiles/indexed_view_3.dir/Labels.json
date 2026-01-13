@@ -1,0 +1,16 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/shreejitverma/Documents/GitHub/Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework/AdaptiveVolFramework/build/_deps/eigen3-src/test/indexed_view.cpp"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"BuildOfficial"
+		],
+		"name" : "indexed_view_3"
+	}
+}
