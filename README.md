@@ -1,202 +1,99 @@
 # Adaptive Volatility Regime-Based Execution & Risk Framework
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Standard](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
-![Build](https://img.shields.io/badge/build-passing-brightgreen.svg)
+## 1. Executive Summary
 
-A high-performance C++ framework designed for **High-Frequency Trading (HFT)** and quantitative research. This system dynamically adapts execution algorithms and risk parameters by identifying latent market regimes (Low, Normal, High Volatility) in real-time.
+This project presents a high-performance C++ framework for **adaptive trading and risk management**. The core thesis is that financial market volatility is not constant but switches between distinct **regimes** (e.g., low, normal, and high). By identifying these regimes in real-time, we can dynamically adjust execution strategies and risk parameters to optimize performance and mitigate catastrophic losses.
 
-It integrates advanced econometric models (**TSRV**, **MedRV**, **HAR**) with machine learning (**HMM**) and self-exciting point processes (**Hawkes**) to provide a robust safety net for automated trading strategies.
+The framework is designed for high-frequency applications and integrates several key quantitative finance concepts:
+- **Microstructure-Robust Volatility Estimation:** Using advanced estimators like TSRV and MedRV to handle market noise and jumps.
+- **Regime Detection:** Employing a Hidden Markov Model (HMM) to classify the current market state.
+- **Real-Time Safety Nets:** Utilizing Hawkes Processes for flash crash detection and Lee-Mykland tests for instantaneous price jump filtering.
+- **Adaptive Execution:** Adjusting position sizes and execution algorithms based on the detected regime.
+
+This document outlines the theoretical underpinnings, system architecture, implementation details, and backtesting results of the framework.
 
 ---
 
-## Key Features
+## 2. Theoretical Framework
 
-### 1. Volatility and Jump Estimation
+The model is built upon a cascade of econometric and statistical techniques, each addressing a specific market phenomenon.
 
-The framework provides a suite of advanced estimators to handle the complexities of high-frequency financial data, including microstructure noise and price jumps.
+### 2.1. Volatility and Jump Measurement
 
-*   **Two-Scale Realized Volatility (TSRV):**
-    A robust estimator that mitigates microstructure noise by subsampling high-frequency returns and applying a bias correction.
+Standard Realized Volatility (`RV`) is susceptible to microstructure noise and jumps. We use more advanced estimators.
 
-    $$
-    \text{TSRV} = \left(1 - \frac{\bar{n}_K}{n}\right)^{-1} \left(RV_{avg}^{(K)} - \frac{\bar{n}_K}{n} RV_{all}\right)
-    $$
+*   **Median Realized Volatility (MedRV):**
+    To obtain a continuous volatility signal that is robust to sporadic price jumps, we use MedRV. It replaces the squared return in a standard `RV` calculation with the median of a local three-return window.
+
+    $$ 
+    \text{MedRV}_t = \frac{\pi}{6-4\sqrt{3}+\pi} \frac{N}{N-2} \sum_{i=2}^{N} \text{med}(|r_i|, |r_{i-1}|, |r_{i-2}|)^2 
+    $$ 
+
+    This effectively filters out large, isolated returns, providing a cleaner input for our regime detection model.
+
+*   **Lee-Mykland Jump Test:**
+    To explicitly identify and react to jumps, we use the statistical test proposed by Lee and Mykland (2008). It standardizes each return by the local volatility.
+
+    $$ 
+    L_t = \frac{|r_t|}{\hat{\sigma}_t} 
+    $$ 
     
-    *Where:*
-    - `$n$` is the total number of observations.
-    - `$K$` is the subsampling frequency.
-    - `$RV_{all}$` is the standard Realized Volatility on all returns.
-    - `$RV_{avg}^{(K)}$` is the average RV across `$K$` subsampled grids.
+A value of `$L_t$` exceeding a critical threshold (e.g., 3.0) provides statistical evidence of a jump at time `$t$`, allowing our system to enter a defensive state.
 
-*   **Median Integrated Volatility (MedRV):**
-    A powerful estimator that is highly robust to price jumps, providing a cleaner signal of the market's continuous volatility.
+### 2.2. Regime Modeling (Hidden Markov Model)
 
-    $$
-    \text{MedRV}_t = \frac{\pi}{6-4\sqrt{3}+\pi} \frac{N}{N-2} \sum_{i=2}^{N} \text{med}(|r_i|, |r_{i-1}|, |r_{i-2}|)^2
-    $$
+We model the market as a system with unobservable (hidden) states that drive observable phenomena (volatility, jumps).
 
-    *Where:*
-    - `$N$` is the number of returns.
-    - `$r_i$` is the return at time `$i$`.
-    - `med()` is the median function over a local window of three returns.
+*   **Model:** A 3-state Gaussian HMM is used to represent **Low**, **Normal**, and **High** volatility regimes. Each state is defined by a unique Gaussian distribution over our input features (e.g., log-volatility and log-jumps).
+*   **Decoding:** The **Viterbi algorithm** is applied to find the most likely sequence of regimes given the history of observations, providing a real-time indicator of the current market state.
 
-*   **Lee-Mykland Jump Detection:**
-    A statistical test used to identify significant, discontinuous price jumps in real-time. It compares the magnitude of a single return to the estimated local volatility.
+### 2.3. Market Activity Modeling (Hawkes Process)
 
-    $$
-    L_t = \frac{|r_t|}{\hat{\sigma}_t}
-    $$
+To monitor for HFT-specific risks like order book cascades or flash crashes, we model the arrival of trades using a self-exciting Hawkes Process.
+
+*   **Conditional Intensity:** The probability of a trade occurring at time `$t$` is given by the conditional intensity `$\\lambda(t)$`.
+
+    $$ 
+    \lambda(t) = \mu + \sum_{t_i < t} \alpha e^{-\beta(t - t_i)} 
+    $$ 
 
     *Where:*
-    - `$|r_t|$` is the absolute price return.
-    - `$\hat{\sigma}_t$` is the local volatility, typically estimated using Bipower Variation over a recent window. A jump is flagged if `$L_t$` exceeds a critical value (e.g., 3.0-3.5).
-
-### 2. Regime Classification with HMM
-
-The framework uses a **Gaussian Hidden Markov Model (HMM)** to classify the market's latent state into one of three regimes: **Low**, **Normal**, or **High** volatility.
-
-*   **Viterbi Algorithm:** This dynamic programming algorithm is used to efficiently decode the most probable sequence of hidden states given the observed volatility data.
-*   **Log-Transformed Features:** Volatility and jump metrics are log-transformed before being fed into the HMM. This reshapes their distributions to better fit the Gaussian assumptions of the model, leading to more accurate state classification.
-
-### 3. Volatility Forecasting
-
-*   **HAR-RV-J Model:** A Heterogeneous Autoregressive (HAR) model is used for forecasting next-period volatility. It captures the long-memory nature of volatility by using regressors from daily, weekly, and monthly time horizons.
-
-    $$
-    \log(\sigma_{t+1}) = \beta_0 + \beta_d \log(\text{RV}_t^d) + \beta_w \log(\text{RV}_t^w) + \beta_m \log(\text{RV}_t^m) + \beta_j \log(1 + J_t)
-    $$
-
-    *Where:*
-    - `$\sigma_{t+1}$` is the volatility forecast for the next period.
-    - `$\text{RV}^d, \text{RV}^w, \text{RV}^m$` are the daily, weekly, and monthly realized volatilities.
-    - `$J_t$` is the realized jump component.
-
-### 4. HFT Safety and Risk Management
-
-*   **Hawkes Process:** Models the arrival of trades as a self-exciting point process, where each new trade increases the probability of subsequent trades. This is used to measure market intensity and detect "flash crash" type events.
-
-    $$
-    \lambda(t) = \mu + \sum_{t_i < t} \alpha e^{-\beta(t - t_i)}
-    $$
-
-    *Where:*
-    - `$\lambda(t)$` is the conditional intensity at time `$t$`.
-    - `$\mu$` is the baseline intensity.
-    - `$\alpha$` is the magnitude of the jump in intensity after an event.
-    - `$\beta$` is the rate of exponential decay of the excitement.
-
-*   **Adaptive Risk Controls:**
-    - **Dynamic Position Sizing:** Based on the HMM regime, positions are scaled up in low-volatility and scaled down in high-volatility to maintain a stable risk profile.
-    - **Real-time Circuit Breakers:** Both the Hawkes intensity and Lee-Mykland jump tests are monitored. If a critical threshold is breached, execution is immediately halted or significantly curtailed.
+    - `$\\mu$` is the baseline arrival rate.
+    - Each past event `$t_i$` adds `$\\alpha$` to the intensity, which then decays exponentially at a rate of `$\\beta$`.
+    
+A sudden spike in `$\\lambda(t)$` indicates a market frenzy, which triggers our circuit breaker logic.
 
 ---
 
-## System Architecture
+## 3. System Architecture and Implementation
 
-The project is modularized into independent components linked via the `AdaptiveVolCore` library.
+The framework is a modular C++ library (`AdaptiveVolCore`) with a demonstration executable (`AdaptiveVolDemo`).
 
-```
-.
-├── include/adaptive_exec/       # Public API Headers
-│   ├── VolatilityEstimators.hpp # TSRV, MedRV, Lee-Mykland Logic
-│   ├── HMMRegimeDetector.hpp    # Regime Classification (Viterbi)
-│   ├── HARModel.hpp             # Volatility Forecasting
-│   ├── HawkesModel.hpp          # HFT Circuit Breakers
-│   ├── ExecutionEngine.hpp      # VWAP/TWAP & Cost Logic
-│   ├── RiskManager.hpp          # Position Sizing & CVaR
-│   └── backtest/                # Simulation Engine
-├── src/                         # Implementation (Eigen3 optimized)
-├── tests/                       # GoogleTest Suite
-└── AdaptiveVolDemo              # End-to-End Simulation Executable
-```
+*   **Performance:** Code is heavily optimized using C++17, Eigen for vectorized linear algebra, and aggressive compiler flags (`-O3 -march=native`).
+*   **Dependencies:** `Eigen` and `GoogleTest` are managed automatically via `CMake` and `FetchContent`.
+*   **Modularity:**
+    - `VolatilityEstimators`: Implements all volatility/jump metrics.
+    - `HMMRegimeDetector`: Implements the Viterbi algorithm for state decoding.
+    - `HawkesModel`: Implements the intensity tracking model.
+    - `RiskManager`: Contains logic for adaptive position sizing.
+    - `BacktestEngine`: A simple, event-driven engine to simulate strategy performance.
+    - `ReportGenerator`: Prints performance summaries.
 
 ---
 
-## Building the Project
+## 4. Findings and Backtest Performance
 
-### Prerequisites
-*   **CMake** (3.14+)
-*   **C++ Compiler** (GCC, Clang, or MSVC) supporting C++17
-*   **Internet Access** (The build system automatically fetches `Eigen` and `GoogleTest`)
+To validate the framework, we simulate a simple adaptive trend-following strategy on synthetic data designed to exhibit regime changes, drift, and jumps.
 
-### Build Steps
+*   **Strategy:** A simple SMA crossover (5-day vs. 20-day) is used to generate directional signals.
+*   **Adaptation Logic:**
+    1.  **Regime Sizing:** Position size is multiplied by 1.5x in low-volatility regimes and 0.5x in high-volatility regimes.
+    2.  **Jump Filtering:** If the Lee-Mykland statistic exceeds 3.0, position size is reduced by 80% for that period.
+    3.  **Intensity Halts:** If Hawkes intensity exceeds a critical threshold (simulated), trading is halted.
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-repo/Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework.git
-    cd Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework
-    ```
+The results demonstrate the value of adaptation. A static version of this strategy would suffer significant drawdowns during high-volatility periods, whereas our adaptive approach successfully mitigates risk.
 
-2.  **Configure and Compile:**
-    ```bash
-    mkdir build && cd build
-    cmake -DCMAKE_BUILD_TYPE=Release ..
-    make -j4
-    ```
-
-3.  **Run Tests:**
-    ```bash
-    ./UnitTests
-    ```
-    *Output should show 100% pass rate.*
-
-4.  **Run the Demo:**
-    ```bash
-    ./AdaptiveVolDemo
-    ```
-
----
-
-## Usage Examples
-
-### 1. Estimating Robust Volatility
-```cpp
-#include <adaptive_exec/VolatilityEstimators.hpp>
-
-// High-freq returns vector
-std::vector<double> returns = { ... };
-
-// Compute Median Integrated Volatility (Jump Robust)
-double med_rv = VolatilityEstimators::computeMedRV(returns);
-
-// Detect Jumps
-auto jump_stats = VolatilityEstimators::computeLeeMykland(returns);
-if (jump_stats.back() > 3.0) {
-    // Jump detected!
-}
-```
-
-### 2. Detecting Market Regimes
-```cpp
-#include <adaptive_exec/HMMRegimeDetector.hpp>
-
-// Initialize 3-State Model
-HMMRegimeDetector hmm(3);
-
-// Decode Regime (0=Low, 1=Normal, 2=High)
-std::vector<int> states = hmm.predictStates(observations);
-```
-
-### 3. Monitoring HFT Intensity (Hawkes)
-```cpp
-#include <adaptive_exec/HawkesModel.hpp>
-
-HawkesModel hawkes(0.5, 0.8, 1.0); // Baseline, Jump, Decay
-
-// On every trade arrival:
-double intensity = hawkes.addEvent(current_timestamp);
-
-if (ExecutionEngine::checkCircuitBreaker(intensity, 5.0)) {
-    // Halt Trading
-}
-```
-
----
-
-## Backtesting Performance
-
-The simulation engine generates synthetic regime-switching data with drift and jumps to validate the strategy. Recent benchmarks show strong risk-adjusted returns:
+### Simulated Performance Report
 
 ```text
 ==============================================
@@ -212,10 +109,30 @@ The simulation engine generates synthetic regime-switching data with drift and j
 ==============================================
 ```
 
-*Note: Performance depends on synthetic data parameters (drift, volatility, jump frequency).*
+*Note: This performance is on synthetic data tailored to validate the model's adaptive capabilities and is not indicative of live trading results.*
 
 ---
 
-## License
+## 5. Building and Usage
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### Prerequisites
+- **CMake** (3.14+)
+- **C++ Compiler** (GCC, Clang, MSVC) supporting C++17
+
+### Build Steps
+```bash
+git clone https://github.com/shreejitverma/Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework.git
+cd Adaptive-Volatility-Regime-Based-Execution-and-Risk-Framework
+mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j4
+```
+
+### Running Tests and Demo
+```bash
+# Run unit tests
+./UnitTests
+
+# Run the backtest simulation
+./AdaptiveVolDemo
+```
